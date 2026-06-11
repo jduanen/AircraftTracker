@@ -1,0 +1,11 @@
+{
+  "cacheDb": "~/.aircrafttracker/routes.db",
+  "airlineCodesCsv": "data/List_of_airline_codes.csv",
+  "services": [
+    { "name": "airLabs",       "enabled": true,  "apiKey": "" },
+    { "name": "aeroDataBox",   "enabled": false, "rapidApiKey": "" },
+    { "name": "flightAware",   "enabled": false, "apiKey": "" },
+    { "name": "aviationStack", "enabled": false, "apiKey": "" },
+    { "name": "openSky",       "enabled": false, "username": "", "password": "" }
+  ]
+}

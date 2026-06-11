@@ -1,0 +1,202 @@
+# Design document for the project's major components
+
+## callsignLookup
+
+A module that, given an aircraft callsign (e.g. `AAL1599`), returns the airline name and route (origin + destination airports with ICAO codes, names, cities, countries, and coordinates).
+
+### Files
+
+```
+callsignLookup.py            # main module — importable library + CLI
+data/
+  List_of_airline_codes.csv  # Wikipedia airline codes table (IATA, ICAO, Airline, ...)
+requirements.txt             # requests (everything else is stdlib)
+config.example.json          # copy to config.json and fill in API keys
+```
+
+---
+
+### Architecture
+
+```
+callsign
+  │
+  ▼
+RouteCache (SQLite)  ──hit──▶  FlightRoute
+  │
+ miss
+  │
+  ▼
+Service chain (in order, skip unavailable)
+  1. AirLabs
+  2. AeroDataBox
+  3. FlightAware
+  4. AviationStack
+  5. OpenSky  ← last resort; indirect route lookup
+  │
+  ▼
+Airline name fallback: prefix match against data/List_of_airline_codes.csv
+  │
+  ▼
+RouteCache.put() + return FlightRoute
+```
+
+A service is marked unavailable for the session when it returns a rate-limit signal. Services are used in order until one succeeds or all are exhausted. "Not found" from a service is not fatal; the next service is tried.
+
+If no service returns a route but the callsign prefix matches a known ICAO airline code, a partial `FlightRoute` (airline name, no airports) is returned and cached.
+
+---
+
+### Cache
+
+SQLite file, default `~/.aircrafttracker/routes.db`. Created automatically. Schema:
+
+```sql
+CREATE TABLE routes (
+    callsign       TEXT PRIMARY KEY,
+    airline        TEXT,
+    origin_icao    TEXT,  origin_name    TEXT,  origin_city    TEXT,
+    origin_country TEXT,  origin_lat     REAL,  origin_lon     REAL,
+    dest_icao      TEXT,  dest_name      TEXT,  dest_city      TEXT,
+    dest_country   TEXT,  dest_lat       REAL,  dest_lon       REAL,
+    cached_at      TEXT
+);
+```
+
+The cache is permanent (no TTL). Use `--flushCache` to clear all rows.
+
+---
+
+### Services
+
+#### 1. AirLabs: `https://airlabs.co/api/v9/`
+Best free-tier option for direct route lookup.
+- Auth: `?api_key=` query param
+- Route: `GET /flights?flight_icao={callsign}` → `dep_icao`, `arr_icao`
+- Airport detail: `GET /airports?icao_code={code}` → name, city, country, lat, lng
+- Rate limit signals: response body `{"error": {"message": "minute_limit_exceeded"|"hour_limit_exceeded"|"month_limit_exceeded"}}`
+
+#### 2. AeroDataBox: `https://aerodatabox.p.rapidapi.com`
+~500 req/month free via RapidAPI.
+- Auth: `X-RapidAPI-Key` header
+- Route: `GET /flights/callsign/{callsign}`
+- Rate limit signals: HTTP 429, or `X-RateLimit-Requests-Remaining: 0`
+
+#### 3. FlightAware: `https://aeroapi.flightaware.com/aeroapi/`
+Paid; highest data quality.
+- Auth: `x-apikey` header
+- Route: `GET /flights/{callsign}`
+- Rate limit signal: HTTP 429
+
+#### 4. AviationStack: `https://api.aviationstack.com/v1/`
+100 req/month free.
+- Auth: `?access_key=` query param
+- Route: `GET /flights?flight_icao={callsign}`
+- Rate limit signals: HTTP 429 or `{"error": {"code": "usage_limit_reached"}}`
+
+#### 5. OpenSky: `https://opensky-network.org/api`
+400 credits/day free. No direct callsign→route API; route is estimated from trajectory.
+- Auth: OAuth2 Bearer token (30-min TTL, refreshed automatically), or anonymous
+- Step 1: `GET /states/all?callsign={callsign}` → find ICAO24 hex
+- Step 2: `GET /flights/aircraft?icao24={hex}&begin=...&end=...` → estimated departure/arrival airports
+- Rate limit signal: HTTP 429; HTTP 401 triggers token refresh
+
+---
+
+### Config file
+
+`config.json` (copy from `config.example.json`):
+
+```json
+{
+  "cacheDb": "~/.aircrafttracker/routes.db",
+  "airlineCodesCsv": "data/List_of_airline_codes.csv",
+  "services": [
+    { "name": "airLabs",       "enabled": true,  "apiKey": "<key>" },
+    { "name": "aeroDataBox",   "enabled": false, "rapidApiKey": "" },
+    { "name": "flightAware",   "enabled": false, "apiKey": "" },
+    { "name": "aviationStack", "enabled": false, "apiKey": "" },
+    { "name": "openSky",       "enabled": false, "username": "", "password": "" }
+  ]
+}
+```
+
+Paths in the config are resolved relative to the config file's directory. `~` is expanded.
+CLI flags override config values.
+
+---
+
+### CLI
+
+```
+# Single lookup
+python callsignLookup.py AAL1599 --config config.json
+
+# Lookup without a config (airline name only from CSV, no route)
+python callsignLookup.py AAL1599 --airlineCodes data/List_of_airline_codes.csv
+
+# Pass API key directly
+python callsignLookup.py AAL1599 --airLabsKey YOUR_KEY
+
+# Bulk-populate cache from a file of callsigns (one per line)
+python callsignLookup.py --fillCache data/callsigns.txt --config config.json
+
+# Delete all cached routes
+python callsignLookup.py --flushCache --config config.json
+```
+
+Exit code 0 on success, 1 on not-found.
+
+All CLI flags:
+
+| Flag | Description |
+|------|-------------|
+| `--config PATH` | JSON config file (auto-detected as `config.json` if present) |
+| `--cache PATH` | SQLite cache file (overrides config) |
+| `--airlineCodes PATH` | Airline codes CSV (overrides config) |
+| `--airLabsKey KEY` | AirLabs API key |
+| `--aeroDataBoxKey KEY` | AeroDataBox RapidAPI key |
+| `--flightAwareKey KEY` | FlightAware API key |
+| `--aviationStackKey KEY` | AviationStack API key |
+| `--openSkyUser USER` | OpenSky username |
+| `--openSkyPass PASS` | OpenSky password |
+| `--flushCache` | Delete all cached routes and exit |
+| `--fillCache FILE` | Bulk-populate cache from callsign list |
+
+---
+
+### Using as a library
+
+```python
+import sys
+sys.path.insert(0, "/home/jdn/Code/AircraftTracker")
+from callsignLookup import FlightInfoLookup, FlightRoute, Airport
+
+# From a config file
+lookup = FlightInfoLookup(config="/home/jdn/Code/AircraftTracker/config.json")
+
+# Or fully programmatic
+lookup = FlightInfoLookup(
+    cacheDb="~/.aircrafttracker/routes.db",
+    airlineCodesCsv="/home/jdn/Code/AircraftTracker/data/List_of_airline_codes.csv",
+    services=[
+        {"name": "airLabs", "enabled": True, "apiKey": "YOUR_KEY"},
+    ],
+)
+
+route = lookup.lookup("AAL1599")
+# FlightRoute(
+#   callsign="AAL1599",
+#   airline="American Airlines",
+#   origin=Airport(icao="KDFW", name="Dallas Fort Worth Intl", ...),
+#   destination=Airport(icao="KLAX", name="Los Angeles Intl", ...),
+# )
+
+# Bulk cache fill
+lookup.fillCache("/path/to/callsigns.txt")
+
+# Flush cache
+lookup.flushCache()
+```
+
+`FlightRoute.origin` and `FlightRoute.destination` are `None` when no route data is available (airline-only result). Check before accessing airport fields.
