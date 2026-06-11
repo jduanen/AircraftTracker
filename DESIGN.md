@@ -71,6 +71,7 @@ The cache is permanent (no TTL). Use `--flushCache` to clear all rows.
 
 #### 1. AirLabs: `https://airlabs.co/api/v9/`
 Best free-tier option for direct route lookup.
+Must create a (free) account at `https://airlabs.co`.
 - Auth: `?api_key=` query param
 - Route: `GET /flights?flight_icao={callsign}` → `dep_icao`, `arr_icao`
 - Airport detail: `GET /airports?icao_code={code}` → name, city, country, lat, lng
@@ -78,6 +79,7 @@ Best free-tier option for direct route lookup.
 
 #### 2. AeroDataBox: `https://aerodatabox.p.rapidapi.com`
 ~500 req/month free via RapidAPI.
+Must create a (free) account at `https://rapidapi.com` and go to get a key for the AeroDataBox API.
 - Auth: `X-RapidAPI-Key` header
 - Route: `GET /flights/callsign/{callsign}`
 - Rate limit signals: HTTP 429, or `X-RateLimit-Requests-Remaining: 0`
