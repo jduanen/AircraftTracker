@@ -43,7 +43,9 @@ RouteCache.put() + return FlightRoute
 
 A service is marked unavailable for the session when it returns a rate-limit signal. Services are used in order until one succeeds or all are exhausted. "Not found" from a service is not fatal; the next service is tried.
 
-If no service returns a route but the callsign prefix matches a known ICAO airline code, a partial `FlightRoute` (airline name, no airports) is returned and cached.
+Services are tried in order. A service is skipped for the remainder of the session when it returns a rate-limit signal. Any service that returns no route (not found, partial, or error) causes the next service to be tried. The loop stops only when a service returns a route with both origin and destination, or all services are exhausted.
+
+If no service returns a complete route but the callsign prefix matches a known ICAO airline code, a partial `FlightRoute` (airline name, no airports) is returned but not cached.
 
 ---
 
@@ -64,6 +66,8 @@ CREATE TABLE routes (
 ```
 
 The cache is permanent (no TTL). Use `--flushCache` to clear all rows.
+
+Only routes with both origin and destination populated are written to the cache. Airline-only results (no airports) are returned to the caller but not persisted.
 
 ---
 
@@ -140,11 +144,20 @@ python callsignLookup.py AAL1599 --airlineCodes data/List_of_airline_codes.csv
 # Pass API key directly
 python callsignLookup.py AAL1599 --airLabsKey YOUR_KEY
 
+# Cache-only lookup (no cloud service calls)
+python callsignLookup.py AAL1599 --cacheOnly --config config.json
+
 # Bulk-populate cache from a file of callsigns (one per line)
 python callsignLookup.py --fillCache data/callsigns.txt --config config.json
 
 # Delete all cached routes
 python callsignLookup.py --flushCache --config config.json
+
+# Enable debug logging to stdout
+python callsignLookup.py AAL1599 --config config.json --logLevel DEBUG
+
+# Log to a file
+python callsignLookup.py AAL1599 --config config.json --logLevel DEBUG --logFile lookup.log
 ```
 
 Exit code 0 on success, 1 on not-found.
@@ -164,6 +177,9 @@ All CLI flags:
 | `--openSkyPass PASS` | OpenSky password |
 | `--flushCache` | Delete all cached routes and exit |
 | `--fillCache FILE` | Bulk-populate cache from callsign list |
+| `--cacheOnly` | Only consult the cache; never call cloud services |
+| `--logLevel LEVEL` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` (default: `WARNING`) |
+| `--logFile FILE` | Write logs to a file instead of stdout |
 
 ---
 
@@ -194,6 +210,9 @@ route = lookup.lookup("AAL1599")
 #   destination=Airport(icao="KLAX", name="Los Angeles Intl", ...),
 # )
 
+# Cache-only lookup (returns None on miss, never calls services)
+route = lookup.lookup("AAL1599", cacheOnly=True)
+
 # Bulk cache fill
 lookup.fillCache("/path/to/callsigns.txt")
 
@@ -202,3 +221,5 @@ lookup.flushCache()
 ```
 
 `FlightRoute.origin` and `FlightRoute.destination` are `None` when no route data is available (airline-only result). Check before accessing airport fields.
+
+Only routes with both `origin` and `destination` are written to the cache. Airline-only results are returned to the caller but not persisted, so a subsequent call will re-query services.
