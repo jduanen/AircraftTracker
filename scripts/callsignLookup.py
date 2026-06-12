@@ -21,6 +21,7 @@ import os
 import re
 import sqlite3
 import sys
+import threading
 import time
 from dataclasses import dataclass
 
@@ -85,14 +86,16 @@ class RouteCache:
     def __init__(self, dbPath: str):
         dbPath = os.path.expanduser(dbPath)
         os.makedirs(os.path.dirname(dbPath) or ".", exist_ok=True)
-        self._conn = sqlite3.connect(dbPath)
+        self._conn = sqlite3.connect(dbPath, check_same_thread=False)
+        self._lock = threading.Lock()
         self._conn.execute(self._CREATE)
         self._conn.commit()
 
     def get(self, callsign: str) -> FlightRoute | None:
-        row = self._conn.execute(
-            "SELECT * FROM routes WHERE callsign = ?", (callsign,)
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM routes WHERE callsign = ?", (callsign,)
+            ).fetchone()
         if row is None:
             return None
         (cs, airline,
@@ -104,29 +107,32 @@ class RouteCache:
 
     def put(self, route: FlightRoute):
         o, d = route.origin, route.destination
-        self._conn.execute(
-            """INSERT OR REPLACE INTO routes VALUES
-               (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))""",
-            (
-                route.callsign, route.airline,
-                o.icao if o else None, o.name if o else None,
-                o.city if o else None, o.country if o else None,
-                o.lat if o else None, o.lon if o else None,
-                d.icao if d else None, d.name if d else None,
-                d.city if d else None, d.country if d else None,
-                d.lat if d else None, d.lon if d else None,
-            ),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """INSERT OR REPLACE INTO routes VALUES
+                   (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))""",
+                (
+                    route.callsign, route.airline,
+                    o.icao if o else None, o.name if o else None,
+                    o.city if o else None, o.country if o else None,
+                    o.lat if o else None, o.lon if o else None,
+                    d.icao if d else None, d.name if d else None,
+                    d.city if d else None, d.country if d else None,
+                    d.lat if d else None, d.lon if d else None,
+                ),
+            )
+            self._conn.commit()
 
     def flush(self):
-        self._conn.execute("DELETE FROM routes")
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute("DELETE FROM routes")
+            self._conn.commit()
 
     def dump(self) -> list[FlightRoute]:
-        rows = self._conn.execute(
-            "SELECT * FROM routes ORDER BY callsign"
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM routes ORDER BY callsign"
+            ).fetchall()
         results = []
         for row in rows:
             (cs, airline,
