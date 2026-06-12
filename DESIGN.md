@@ -150,6 +150,9 @@ python callsignLookup.py AAL1599 --cacheOnly --config config.json
 # Bulk-populate cache from a file of callsigns (one per line)
 python callsignLookup.py --fillCache data/callsigns.txt --config config.json
 
+# Print all cached routes
+python callsignLookup.py --dumpCache --config config.json
+
 # Delete all cached routes
 python callsignLookup.py --flushCache --config config.json
 
@@ -175,6 +178,7 @@ All CLI flags:
 | `--aviationStackKey KEY` | AviationStack API key |
 | `--openSkyUser USER` | OpenSky username |
 | `--openSkyPass PASS` | OpenSky password |
+| `--dumpCache` | Print all cached routes and exit |
 | `--flushCache` | Delete all cached routes and exit |
 | `--fillCache FILE` | Bulk-populate cache from callsign list |
 | `--cacheOnly` | Only consult the cache; never call cloud services |
@@ -212,6 +216,9 @@ route = lookup.lookup("AAL1599")
 
 # Cache-only lookup (returns None on miss, never calls services)
 route = lookup.lookup("AAL1599", cacheOnly=True)
+
+# Dump all cached routes
+routes = lookup.dumpCache()  # returns list[FlightRoute]
 
 # Bulk cache fill
 lookup.fillCache("/path/to/callsigns.txt")
