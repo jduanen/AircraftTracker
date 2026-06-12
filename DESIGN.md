@@ -118,17 +118,19 @@ Paid; highest data quality.
   "cacheDb": "~/.aircrafttracker/routes.db",
   "airlineCodesCsv": "data/List_of_airline_codes.csv",
   "services": [
-    { "name": "airLabs",       "enabled": true,  "apiKey": "<key>" },
-    { "name": "aeroDataBox",   "enabled": false, "rapidApiKey": "" },
-    { "name": "flightAware",   "enabled": false, "apiKey": "" },
-    { "name": "aviationStack", "enabled": false, "apiKey": "" },
-    { "name": "openSky",       "enabled": false, "username": "", "password": "" }
+    { "name": "airLabs",       "enabled": true,  "apiKey": "<key>",        "requestDelay": 1.0 },
+    { "name": "aeroDataBox",   "enabled": false, "rapidApiKey": "",        "requestDelay": 1.0 },
+    { "name": "flightAware",   "enabled": false, "apiKey": "",             "requestDelay": 0.5 },
+    { "name": "aviationStack", "enabled": false, "apiKey": "",             "requestDelay": 2.0 },
+    { "name": "openSky",       "enabled": false, "username": "", "password": "", "requestDelay": 5.0 }
   ]
 }
 ```
 
 Paths in the config are resolved relative to the config file's directory. `~` is expanded.
 CLI flags override config values.
+
+`requestDelay` (seconds, default `0.0`) is the minimum pause after each call to that service. Applied after every attempt — hit, miss, or error — so consecutive calls during `--fillCache` don't exceed the service's rate limit. Suggested starting values are shown above; tune to your plan's actual limits.
 
 ---
 
