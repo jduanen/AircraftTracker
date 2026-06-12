@@ -26,6 +26,8 @@ from dataclasses import dataclass
 
 import requests
 
+DEF_ROUTE_DB_PATH = "~/.aircrafttracker/routes.db"
+
 log = logging.getLogger(__name__)
 
 
@@ -519,7 +521,9 @@ class FlightInfoLookup:
         cacheDb: str | None = None,
         services: list[dict] | None = None,
         airlineCodesCsv: str | None = None,
+        cacheOnly: bool = False,
     ):
+        self.cacheOnly = cacheOnly
         cfg = {}
         configDir = "."
         if config:
@@ -532,7 +536,7 @@ class FlightInfoLookup:
             path = os.path.expanduser(path)
             return path if os.path.isabs(path) else os.path.join(configDir, path)
 
-        dbPath = cacheDb or cfg.get("cacheDb") or "~/.aircrafttracker/routes.db"
+        dbPath = cacheDb or cfg.get("cacheDb") or DEF_ROUTE_DB_PATH
         self._cache = RouteCache(_resolve(dbPath))
 
         csvPath = airlineCodesCsv or cfg.get("airlineCodesCsv")
@@ -557,7 +561,7 @@ class FlightInfoLookup:
             log.debug("Cache hit: %s", callsign)
             return cached
 
-        if cacheOnly:
+        if cacheOnly or self.cacheOnly:
             log.debug("Cache miss for %s (cacheOnly — not calling services)", callsign)
             return None
 
@@ -682,6 +686,7 @@ def main():
         cacheDb=args.cache,
         airlineCodesCsv=args.airlineCodes,
         services=_serviceOverrides(args),
+        cacheOnly=args.cacheOnly,
     )
 
     if args.flushCache:
@@ -707,7 +712,7 @@ def main():
         _makeParser().print_help()
         sys.exit(1)
 
-    route = lookup.lookup(args.callsign, cacheOnly=args.cacheOnly)
+    route = lookup.lookup(args.callsign)
     if route is None:
         print(f"{args.callsign}: not found")
         sys.exit(1)
