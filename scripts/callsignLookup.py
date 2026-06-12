@@ -121,6 +121,20 @@ class RouteCache:
         self._conn.execute("DELETE FROM routes")
         self._conn.commit()
 
+    def dump(self) -> list[FlightRoute]:
+        rows = self._conn.execute(
+            "SELECT * FROM routes ORDER BY callsign"
+        ).fetchall()
+        results = []
+        for row in rows:
+            (cs, airline,
+             o_icao, o_name, o_city, o_country, o_lat, o_lon,
+             d_icao, d_name, d_city, d_country, d_lat, d_lon, _) = row
+            origin = Airport(o_icao, o_name, o_city, o_country, o_lat or 0.0, o_lon or 0.0) if o_icao else None
+            dest = Airport(d_icao, d_name, d_city, d_country, d_lat or 0.0, d_lon or 0.0) if d_icao else None
+            results.append(FlightRoute(cs, airline or "", origin, dest))
+        return results
+
 
 # ---------------------------------------------------------------------------
 # Service adapters
@@ -606,6 +620,9 @@ class FlightInfoLookup:
     def flushCache(self):
         self._cache.flush()
 
+    def dumpCache(self) -> list[FlightRoute]:
+        return self._cache.dump()
+
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -626,6 +643,7 @@ def _makeParser() -> argparse.ArgumentParser:
     p.add_argument("--openSkyUser",     metavar="USER")
     p.add_argument("--openSkyPass",     metavar="PASS")
     p.add_argument("--flushCache",      action="store_true", help="Delete all cached routes and exit")
+    p.add_argument("--dumpCache",       action="store_true", help="Print all cached routes and exit")
     p.add_argument("--fillCache",       metavar="FILE", help="Bulk-populate cache from callsign list file")
     p.add_argument("--cacheOnly",       action="store_true", help="Only consult the cache; never call cloud services")
     p.add_argument("--logLevel",        metavar="LEVEL", default="WARNING",
@@ -669,6 +687,16 @@ def main():
     if args.flushCache:
         lookup.flushCache()
         print("Cache flushed.")
+        return
+
+    if args.dumpCache:
+        routes = lookup.dumpCache()
+        if not routes:
+            print("Cache is empty.")
+        for route in routes:
+            origin = route.origin.icao if route.origin else "(unknown)"
+            dest = route.destination.icao if route.destination else "(unknown)"
+            print(f"{route.callsign:<12} {route.airline:<30} {origin} → {dest}")
         return
 
     if args.fillCache:
