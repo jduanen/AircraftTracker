@@ -147,6 +147,9 @@ python callsignLookup.py AAL1599 --airLabsKey YOUR_KEY
 # Cache-only lookup (no cloud service calls)
 python callsignLookup.py AAL1599 --cacheOnly --config config.json
 
+# Bulk lookup using only the cache (never calls services, even on miss)
+python callsignLookup.py --fillCache callsigns.txt --cacheOnly --config config.json
+
 # Bulk-populate cache from a file of callsigns (one per line)
 python callsignLookup.py --fillCache data/callsigns.txt --config config.json
 
@@ -181,7 +184,7 @@ All CLI flags:
 | `--dumpCache` | Print all cached routes and exit |
 | `--flushCache` | Delete all cached routes and exit |
 | `--fillCache FILE` | Bulk-populate cache from callsign list |
-| `--cacheOnly` | Only consult the cache; never call cloud services |
+| `--cacheOnly` | Only consult the cache; never call cloud services (applies to `--fillCache` too) |
 | `--logLevel LEVEL` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` (default: `WARNING`) |
 | `--logFile FILE` | Write logs to a file instead of stdout |
 
@@ -214,7 +217,11 @@ route = lookup.lookup("AAL1599")
 #   destination=Airport(icao="KLAX", name="Los Angeles Intl", ...),
 # )
 
-# Cache-only lookup (returns None on miss, never calls services)
+# Cache-only mode (applies to all lookups including fillCache)
+lookup = FlightInfoLookup(config="...", cacheOnly=True)
+route = lookup.lookup("AAL1599")  # returns None on miss, never calls services
+
+# Or override per-call (does not affect fillCache)
 route = lookup.lookup("AAL1599", cacheOnly=True)
 
 # Dump all cached routes
