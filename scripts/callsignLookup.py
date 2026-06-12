@@ -550,7 +550,7 @@ class FlightInfoLookup:
                 continue
             log.debug("Trying service %s for %s", svc.name, callsign)
             try:
-                route = svc.lookup(callsign)
+                result = svc.lookup(callsign)
             except RateLimitError as e:
                 log.debug("%s rate-limited: %s — marking unavailable", svc.name, e)
                 svc.available = False
@@ -558,10 +558,14 @@ class FlightInfoLookup:
             except ServiceUnavailableError as e:
                 log.debug("%s unavailable: %s", svc.name, e)
                 continue
-            if route is not None:
-                log.debug("%s returned route for %s", svc.name, callsign)
+            if result is None:
+                log.debug("%s: not found for %s", svc.name, callsign)
+                continue
+            if result.origin and result.destination:
+                log.debug("%s returned full route for %s", svc.name, callsign)
+                route = result
                 break
-            log.debug("%s: not found for %s", svc.name, callsign)
+            log.debug("%s returned partial result for %s — trying next service", svc.name, callsign)
 
         airline = (route.airline if route else "") or self._airlineLookup.get(_callsignPrefix(callsign), "")
 
