@@ -567,14 +567,15 @@ class FlightInfoLookup:
 
         if route is not None:
             route.airline = airline
-            self._cache.put(route)
+            if route.origin and route.destination:
+                self._cache.put(route)
+            else:
+                log.debug("Not caching %s — missing origin or destination", callsign)
             return route
 
         if airline:
             log.debug("No route found; returning airline-only result for %s (%s)", callsign, airline)
-            partial = FlightRoute(callsign=callsign, airline=airline, origin=None, destination=None)
-            self._cache.put(partial)
-            return partial
+            return FlightRoute(callsign=callsign, airline=airline, origin=None, destination=None)
 
         log.debug("No result found for %s", callsign)
         return None
