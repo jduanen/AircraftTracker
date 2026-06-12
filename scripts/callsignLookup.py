@@ -146,9 +146,10 @@ class AirLabsService:
     name = "airLabs"
     _BASE = "https://airlabs.co/api/v9"
 
-    def __init__(self, apiKey: str):
+    def __init__(self, apiKey: str, requestDelay: float = 0.0):
         self.apiKey = apiKey
         self.available = True
+        self.requestDelay = requestDelay
         self._session = requests.Session()
 
     def _get(self, path: str, params: dict) -> dict:
@@ -215,9 +216,10 @@ class AeroDataBoxService:
     name = "aeroDataBox"
     _BASE = "https://aerodatabox.p.rapidapi.com"
 
-    def __init__(self, rapidApiKey: str):
+    def __init__(self, rapidApiKey: str, requestDelay: float = 0.0):
         self.rapidApiKey = rapidApiKey
         self.available = True
+        self.requestDelay = requestDelay
         self._session = requests.Session()
         self._session.headers.update({
             "X-RapidAPI-Key": rapidApiKey,
@@ -267,9 +269,10 @@ class FlightAwareService:
     name = "flightAware"
     _BASE = "https://aeroapi.flightaware.com/aeroapi"
 
-    def __init__(self, apiKey: str):
+    def __init__(self, apiKey: str, requestDelay: float = 0.0):
         self.apiKey = apiKey
         self.available = True
+        self.requestDelay = requestDelay
         self._session = requests.Session()
         self._session.headers.update({"x-apikey": apiKey})
 
@@ -319,9 +322,10 @@ class AviationStackService:
     name = "aviationStack"
     _BASE = "https://api.aviationstack.com/v1"
 
-    def __init__(self, apiKey: str):
+    def __init__(self, apiKey: str, requestDelay: float = 0.0):
         self.apiKey = apiKey
         self.available = True
+        self.requestDelay = requestDelay
         self._session = requests.Session()
 
     def lookup(self, callsign: str) -> FlightRoute | None:
@@ -380,10 +384,11 @@ class OpenSkyService:
     _BASE = "https://opensky-network.org/api"
     _TOKEN_URL = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
 
-    def __init__(self, username: str = "", password: str = ""):
+    def __init__(self, username: str = "", password: str = "", requestDelay: float = 0.0):
         self.username = username
         self.password = password
         self.available = True
+        self.requestDelay = requestDelay
         self._session = requests.Session()
         self._token: str | None = None
         self._tokenExpiry: float = 0.0
@@ -501,16 +506,17 @@ def _callsignPrefix(callsign: str) -> str:
 
 def _buildService(cfg: dict):
     name = cfg.get("name", "")
+    delay = float(cfg.get("requestDelay", 0.0))
     if name == "airLabs":
-        return AirLabsService(apiKey=cfg.get("apiKey", ""))
+        return AirLabsService(apiKey=cfg.get("apiKey", ""), requestDelay=delay)
     if name == "aeroDataBox":
-        return AeroDataBoxService(rapidApiKey=cfg.get("rapidApiKey", ""))
+        return AeroDataBoxService(rapidApiKey=cfg.get("rapidApiKey", ""), requestDelay=delay)
     if name == "flightAware":
-        return FlightAwareService(apiKey=cfg.get("apiKey", ""))
+        return FlightAwareService(apiKey=cfg.get("apiKey", ""), requestDelay=delay)
     if name == "aviationStack":
-        return AviationStackService(apiKey=cfg.get("apiKey", ""))
+        return AviationStackService(apiKey=cfg.get("apiKey", ""), requestDelay=delay)
     if name == "openSky":
-        return OpenSkyService(username=cfg.get("username", ""), password=cfg.get("password", ""))
+        return OpenSkyService(username=cfg.get("username", ""), password=cfg.get("password", ""), requestDelay=delay)
     raise ValueError(f"Unknown service: {name!r}")
 
 
@@ -584,6 +590,10 @@ class FlightInfoLookup:
             except Exception as e:
                 log.debug("%s unexpected error: %s — skipping", svc.name, e)
                 continue
+            finally:
+                if svc.requestDelay > 0:
+                    log.debug("%s: sleeping %.1fs (requestDelay)", svc.name, svc.requestDelay)
+                    time.sleep(svc.requestDelay)
             if result is None:
                 log.debug("%s: not found for %s — trying next service", svc.name, callsign)
                 continue
