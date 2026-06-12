@@ -535,7 +535,7 @@ class FlightInfoLookup:
         log.debug("FlightInfoLookup: services=%s airlineCodes=%s db=%s",
                   [s.name for s in self._services], csvPath, dbPath)
 
-    def lookup(self, callsign: str) -> FlightRoute | None:
+    def lookup(self, callsign: str, cacheOnly: bool = False) -> FlightRoute | None:
         callsign = callsign.strip().upper()
 
         cached = self._cache.get(callsign)
@@ -543,7 +543,12 @@ class FlightInfoLookup:
             log.debug("Cache hit: %s", callsign)
             return cached
 
+        if cacheOnly:
+            log.debug("Cache miss for %s (cacheOnly — not calling services)", callsign)
+            return None
+
         route = None
+        log.debug("Service chain for %s: %s", callsign, [s.name for s in self._services])
         for svc in self._services:
             if not svc.available:
                 log.debug("Skipping %s (rate-limited this session)", svc.name)
@@ -558,8 +563,11 @@ class FlightInfoLookup:
             except ServiceUnavailableError as e:
                 log.debug("%s unavailable: %s", svc.name, e)
                 continue
+            except Exception as e:
+                log.debug("%s unexpected error: %s — skipping", svc.name, e)
+                continue
             if result is None:
-                log.debug("%s: not found for %s", svc.name, callsign)
+                log.debug("%s: not found for %s — trying next service", svc.name, callsign)
                 continue
             if result.origin and result.destination:
                 log.debug("%s returned full route for %s", svc.name, callsign)
@@ -619,6 +627,7 @@ def _makeParser() -> argparse.ArgumentParser:
     p.add_argument("--openSkyPass",     metavar="PASS")
     p.add_argument("--flushCache",      action="store_true", help="Delete all cached routes and exit")
     p.add_argument("--fillCache",       metavar="FILE", help="Bulk-populate cache from callsign list file")
+    p.add_argument("--cacheOnly",       action="store_true", help="Only consult the cache; never call cloud services")
     p.add_argument("--logLevel",        metavar="LEVEL", default="WARNING",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"],
                    help="Log level (default: WARNING)")
@@ -670,7 +679,7 @@ def main():
         _makeParser().print_help()
         sys.exit(1)
 
-    route = lookup.lookup(args.callsign)
+    route = lookup.lookup(args.callsign, cacheOnly=args.cacheOnly)
     if route is None:
         print(f"{args.callsign}: not found")
         sys.exit(1)
