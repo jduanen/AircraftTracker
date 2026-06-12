@@ -16,6 +16,7 @@ CLI:
 import argparse
 import csv
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -24,6 +25,8 @@ import time
 from dataclasses import dataclass
 
 import requests
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -134,10 +137,15 @@ class AirLabsService:
 
     def _get(self, path: str, params: dict) -> dict:
         params["api_key"] = self.apiKey
+        url = f"{self._BASE}{path}"
+        safe = {k: v for k, v in params.items() if k != "api_key"}
+        log.debug("AirLabs GET %s params=%s", url, safe)
         try:
-            resp = self._session.get(f"{self._BASE}{path}", params=params, timeout=10)
+            resp = self._session.get(url, params=params, timeout=10)
         except requests.RequestException as e:
+            log.debug("AirLabs request error: %s", e)
             raise ServiceUnavailableError(str(e))
+        log.debug("AirLabs response %s", resp.status_code)
         if resp.status_code == 429:
             raise RateLimitError("HTTP 429")
         if not resp.ok:
@@ -145,12 +153,14 @@ class AirLabsService:
         data = resp.json()
         err = data.get("error", {}).get("message", "")
         if "limit_exceeded" in err:
+            log.debug("AirLabs rate limit: %s", err)
             raise RateLimitError(err)
         return data
 
     def _resolveAirport(self, icao: str) -> Airport | None:
         if not icao:
             return None
+        log.debug("AirLabs resolving airport %s", icao)
         try:
             data = self._get("/airports", {"icao_code": icao})
         except (RateLimitError, ServiceUnavailableError):
@@ -169,14 +179,17 @@ class AirLabsService:
         )
 
     def lookup(self, callsign: str) -> FlightRoute | None:
+        log.debug("AirLabs lookup %s", callsign)
         data = self._get("/flights", {"flight_icao": callsign})
         rows = data.get("response", [])
         if not rows:
+            log.debug("AirLabs: no flight found for %s", callsign)
             return None
         r = rows[0]
         dep_icao = r.get("dep_icao") or ""
         arr_icao = r.get("arr_icao") or ""
         airline = r.get("airline_icao", "") or ""
+        log.debug("AirLabs: %s → dep=%s arr=%s airline=%s", callsign, dep_icao, arr_icao, airline)
         origin = self._resolveAirport(dep_icao)
         dest = self._resolveAirport(arr_icao)
         return FlightRoute(callsign=callsign, airline=airline, origin=origin, destination=dest)
@@ -196,12 +209,14 @@ class AeroDataBoxService:
         })
 
     def lookup(self, callsign: str) -> FlightRoute | None:
+        url = f"{self._BASE}/flights/callsign/{callsign}"
+        log.debug("AeroDataBox GET %s", url)
         try:
-            resp = self._session.get(
-                f"{self._BASE}/flights/callsign/{callsign}", timeout=10
-            )
+            resp = self._session.get(url, timeout=10)
         except requests.RequestException as e:
+            log.debug("AeroDataBox request error: %s", e)
             raise ServiceUnavailableError(str(e))
+        log.debug("AeroDataBox response %s", resp.status_code)
         if resp.status_code == 429 or resp.headers.get("X-RateLimit-Requests-Remaining") == "0":
             raise RateLimitError("rate limit")
         if resp.status_code == 404:
@@ -211,10 +226,12 @@ class AeroDataBoxService:
         data = resp.json()
         flights = data if isinstance(data, list) else data.get("items", [])
         if not flights:
+            log.debug("AeroDataBox: no flights for %s", callsign)
             return None
         f = flights[0]
         dep = f.get("departure", {}).get("airport", {})
         arr = f.get("arrival", {}).get("airport", {})
+        log.debug("AeroDataBox: %s → dep=%s arr=%s", callsign, dep.get("icao"), arr.get("icao"))
         origin = Airport(
             icao=dep.get("icao", ""), name=dep.get("name", ""),
             city=dep.get("municipalityName", ""), country="",
@@ -241,12 +258,14 @@ class FlightAwareService:
         self._session.headers.update({"x-apikey": apiKey})
 
     def lookup(self, callsign: str) -> FlightRoute | None:
+        url = f"{self._BASE}/flights/{callsign}"
+        log.debug("FlightAware GET %s", url)
         try:
-            resp = self._session.get(
-                f"{self._BASE}/flights/{callsign}", timeout=10
-            )
+            resp = self._session.get(url, timeout=10)
         except requests.RequestException as e:
+            log.debug("FlightAware request error: %s", e)
             raise ServiceUnavailableError(str(e))
+        log.debug("FlightAware response %s", resp.status_code)
         if resp.status_code == 429:
             raise RateLimitError("HTTP 429")
         if resp.status_code == 404:
@@ -256,10 +275,13 @@ class FlightAwareService:
         data = resp.json()
         flights = data.get("flights", [])
         if not flights:
+            log.debug("FlightAware: no flights for %s", callsign)
             return None
         f = flights[0]
         dep = f.get("origin", {})
         arr = f.get("destination", {})
+        log.debug("FlightAware: %s → dep=%s arr=%s",
+                  callsign, dep.get("code_icao") or dep.get("code"), arr.get("code_icao") or arr.get("code"))
         origin = Airport(
             icao=dep.get("code_icao", "") or dep.get("code", ""),
             name=dep.get("name", ""), city=dep.get("city", ""),
@@ -287,27 +309,36 @@ class AviationStackService:
         self._session = requests.Session()
 
     def lookup(self, callsign: str) -> FlightRoute | None:
+        url = f"{self._BASE}/flights"
+        log.debug("AviationStack GET %s params=flight_icao=%s", url, callsign)
         try:
             resp = self._session.get(
-                f"{self._BASE}/flights",
+                url,
                 params={"access_key": self.apiKey, "flight_icao": callsign},
                 timeout=10,
             )
         except requests.RequestException as e:
+            log.debug("AviationStack request error: %s", e)
             raise ServiceUnavailableError(str(e))
+        log.debug("AviationStack response %s", resp.status_code)
         if resp.status_code == 429:
             raise RateLimitError("HTTP 429")
         if not resp.ok:
             raise ServiceUnavailableError(f"HTTP {resp.status_code}")
         data = resp.json()
         if data.get("error", {}).get("code") == "usage_limit_reached":
+            log.debug("AviationStack rate limit reached")
             raise RateLimitError("usage_limit_reached")
         rows = data.get("data", [])
         if not rows:
+            log.debug("AviationStack: no flights for %s", callsign)
             return None
         f = rows[0]
         dep = f.get("departure", {})
         arr = f.get("arrival", {})
+        airline = (f.get("airline") or {}).get("icao", "")
+        log.debug("AviationStack: %s → dep=%s arr=%s airline=%s",
+                  callsign, dep.get("icao"), arr.get("icao"), airline)
         origin = Airport(
             icao=dep.get("icao", ""), name=dep.get("airport", ""),
             city="", country="",
@@ -320,7 +351,6 @@ class AviationStackService:
             lat=float(arr.get("latitude", 0.0) or 0.0),
             lon=float(arr.get("longitude", 0.0) or 0.0),
         ) if arr.get("icao") else None
-        airline = (f.get("airline") or {}).get("icao", "")
         return FlightRoute(callsign=callsign, airline=airline or "", origin=origin, destination=dest)
 
 
@@ -345,6 +375,7 @@ class OpenSkyService:
     def _refreshToken(self):
         if not self.username:
             return
+        log.debug("OpenSky refreshing OAuth2 token for user %s", self.username)
         try:
             resp = requests.post(
                 self._TOKEN_URL,
@@ -360,8 +391,11 @@ class OpenSkyService:
                 d = resp.json()
                 self._token = d["access_token"]
                 self._tokenExpiry = time.time() + d.get("expires_in", 1800) - 60
-        except Exception:
-            pass
+                log.debug("OpenSky token acquired, expires_in=%s", d.get("expires_in"))
+            else:
+                log.debug("OpenSky token refresh failed: HTTP %s", resp.status_code)
+        except Exception as e:
+            log.debug("OpenSky token refresh error: %s", e)
 
     def _headers(self) -> dict:
         if self.username:
@@ -372,17 +406,21 @@ class OpenSkyService:
         return {}
 
     def _get(self, path: str, params: dict = {}) -> dict | None:
+        url = f"{self._BASE}{path}"
+        log.debug("OpenSky GET %s params=%s", url, params)
         try:
             resp = self._session.get(
-                f"{self._BASE}{path}", params=params,
+                url, params=params,
                 headers=self._headers(), timeout=15
             )
         except requests.RequestException as e:
+            log.debug("OpenSky request error: %s", e)
             raise ServiceUnavailableError(str(e))
+        log.debug("OpenSky response %s", resp.status_code)
         if resp.status_code == 429:
             raise RateLimitError("HTTP 429")
         if resp.status_code == 401:
-            self._tokenExpiry = 0.0  # force refresh next call
+            self._tokenExpiry = 0.0
             raise ServiceUnavailableError("HTTP 401 — token expired")
         if resp.status_code == 404 or resp.status_code == 204:
             return None
@@ -391,13 +429,14 @@ class OpenSkyService:
         return resp.json()
 
     def lookup(self, callsign: str) -> FlightRoute | None:
-        # Step 1: find ICAO24 from live state vectors
+        log.debug("OpenSky lookup %s (step 1: states/all)", callsign)
         data = self._get("/states/all", {"callsign": callsign.ljust(8)})
         if not data or not data.get("states"):
+            log.debug("OpenSky: no live state for %s", callsign)
             return None
         icao24 = data["states"][0][0]
+        log.debug("OpenSky: %s → icao24=%s (step 2: flights/aircraft)", callsign, icao24)
 
-        # Step 2: look up recent flight records for that aircraft
         now = int(time.time())
         data = self._get("/flights/aircraft", {
             "icao24": icao24,
@@ -405,6 +444,7 @@ class OpenSkyService:
             "end": now,
         })
         if not data:
+            log.debug("OpenSky: no flight records for icao24=%s", icao24)
             return None
         flights = [f for f in data if f.get("callsign", "").strip() == callsign]
         if not flights:
@@ -412,6 +452,7 @@ class OpenSkyService:
         f = flights[-1]
         dep_icao = f.get("estDepartureAirport") or ""
         arr_icao = f.get("estArrivalAirport") or ""
+        log.debug("OpenSky: %s → dep=%s arr=%s", callsign, dep_icao, arr_icao)
         if not dep_icao and not arr_icao:
             return None
         origin = Airport(dep_icao, "", "", "", 0.0, 0.0) if dep_icao else None
@@ -491,27 +532,36 @@ class FlightInfoLookup:
         self._services = [
             _buildService(s) for s in serviceCfgs if s.get("enabled", True)
         ]
+        log.debug("FlightInfoLookup: services=%s airlineCodes=%s db=%s",
+                  [s.name for s in self._services], csvPath, dbPath)
 
     def lookup(self, callsign: str) -> FlightRoute | None:
         callsign = callsign.strip().upper()
 
         cached = self._cache.get(callsign)
         if cached is not None:
+            log.debug("Cache hit: %s", callsign)
             return cached
 
         route = None
         for svc in self._services:
             if not svc.available:
+                log.debug("Skipping %s (rate-limited this session)", svc.name)
                 continue
+            log.debug("Trying service %s for %s", svc.name, callsign)
             try:
                 route = svc.lookup(callsign)
-            except RateLimitError:
+            except RateLimitError as e:
+                log.debug("%s rate-limited: %s — marking unavailable", svc.name, e)
                 svc.available = False
                 continue
-            except ServiceUnavailableError:
+            except ServiceUnavailableError as e:
+                log.debug("%s unavailable: %s", svc.name, e)
                 continue
             if route is not None:
+                log.debug("%s returned route for %s", svc.name, callsign)
                 break
+            log.debug("%s: not found for %s", svc.name, callsign)
 
         airline = (route.airline if route else "") or self._airlineLookup.get(_callsignPrefix(callsign), "")
 
@@ -521,10 +571,12 @@ class FlightInfoLookup:
             return route
 
         if airline:
+            log.debug("No route found; returning airline-only result for %s (%s)", callsign, airline)
             partial = FlightRoute(callsign=callsign, airline=airline, origin=None, destination=None)
             self._cache.put(partial)
             return partial
 
+        log.debug("No result found for %s", callsign)
         return None
 
     def fillCache(self, callsignsFile: str):
@@ -562,6 +614,10 @@ def _makeParser() -> argparse.ArgumentParser:
     p.add_argument("--openSkyPass",     metavar="PASS")
     p.add_argument("--flushCache",      action="store_true", help="Delete all cached routes and exit")
     p.add_argument("--fillCache",       metavar="FILE", help="Bulk-populate cache from callsign list file")
+    p.add_argument("--logLevel",        metavar="LEVEL", default="WARNING",
+                   choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+                   help="Log level (default: WARNING)")
+    p.add_argument("--logFile",         metavar="FILE", help="Log to file instead of stdout")
     return p
 
 
@@ -583,6 +639,11 @@ def _serviceOverrides(args: argparse.Namespace) -> list[dict] | None:
 
 def main():
     args = _makeParser().parse_args()
+
+    handler = logging.FileHandler(args.logFile) if args.logFile else logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logging.getLogger().addHandler(handler)
+    logging.getLogger().setLevel(args.logLevel)
 
     lookup = FlightInfoLookup(
         config=args.config,
