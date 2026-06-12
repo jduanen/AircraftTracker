@@ -7,11 +7,13 @@ A module that, given an aircraft callsign (e.g. `AAL1599`), returns the airline 
 ### Files
 
 ```
-callsignLookup.py            # main module — importable library + CLI
+scripts/
+  callsignLookup.py          # main module — importable library + CLI
+  callsignServer.py          # Flask web API server
+  config.example.json        # copy to config.json and fill in API keys
 data/
   List_of_airline_codes.csv  # Wikipedia airline codes table (IATA, ICAO, Airline, ...)
-requirements.txt             # requests (everything else is stdlib)
-config.example.json          # copy to config.json and fill in API keys
+requirements.txt             # requests, flask
 ```
 
 ---
@@ -189,6 +191,48 @@ All CLI flags:
 | `--cacheOnly` | Only consult the cache; never call cloud services (applies to `--fillCache` too) |
 | `--logLevel LEVEL` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` (default: `WARNING`) |
 | `--logFile FILE` | Write logs to a file instead of stdout |
+
+---
+
+### Web API server
+
+`callsignServer.py` wraps `FlightInfoLookup` in a Flask HTTP server accessible to any machine on the LAN.
+
+```
+# Start the server
+python scripts/callsignServer.py --config config.json [--port 5000] [--host 0.0.0.0]
+
+# Optional flags (same as callsignLookup.py)
+  --cache PATH       SQLite cache file
+  --airlineCodes PATH
+  --cacheOnly        Never call cloud services
+  --logLevel LEVEL   DEBUG / INFO / WARNING / ERROR (default: INFO)
+  --logFile FILE
+```
+
+**Endpoint:**
+
+```
+GET /callsign/<callsign>
+```
+
+**Response — found (HTTP 200):**
+```json
+{
+  "found": true,
+  "callsign": "UAL2409",
+  "airline": "United Airlines",
+  "origin":      { "icao": "CYYC", "name": "Calgary Int'l", "city": "Calgary", "country": "", "lat": 0.0, "lon": 0.0 },
+  "destination": { "icao": "KSFO", "name": "San Francisco Int'l", "city": "San Francisco", "country": "", "lat": 0.0, "lon": 0.0 }
+}
+```
+
+`origin` and `destination` are `null` when no route data is available (airline-only result).
+
+**Response — not found (HTTP 404):**
+```json
+{ "found": false, "callsign": "INVALID999" }
+```
 
 ---
 
